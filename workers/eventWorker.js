@@ -2,20 +2,43 @@ import { parentPort } from 'node:worker_threads';
 import db from '../db.js';
 
 const BATCH_SIZE = 50;
-const POLL_INTERVAL_MS = 0; // rely on blocking via transaction when no rows
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Simple notify queue for blocking waits
+const signals = [];
+let notifyResolver = null;
+function notify() {
+  if (notifyResolver) {
+    const r = notifyResolver;
+    notifyResolver = null;
+    r();
+  } else {
+    signals.push(true);
+  }
+}
+
+function waitForNotify() {
+  if (signals.length > 0) {
+    signals.pop();
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    notifyResolver = resolve;
+  });
+}
+
+if (parentPort) {
+  parentPort.on('message', (msg) => {
+    if (msg === 'notify') notify();
+    if (msg === 'shutdown') process.exit(0);
+  });
 }
 
 async function fetchAndLogBatch() {
-  const rows = db.query(
-    'select id, data from event limit ?',
-    [BATCH_SIZE]
-  );
+  const rows = db.query('select id, data from event limit ?', [BATCH_SIZE]);
 
   if (!rows || rows.length === 0) {
-    await sleep(1000);
+    // Block until notified of new events
+    await waitForNotify();
     return;
   }
 
@@ -35,7 +58,8 @@ async function run() {
       await fetchAndLogBatch();
     } catch (err) {
       console.error('[eventWorker] Error:', err);
-      await sleep(1000);
+      // In case of errors, avoid tight loop
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 }
