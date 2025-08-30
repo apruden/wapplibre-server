@@ -1,11 +1,13 @@
 import express from 'express';
 import bodyParser from "body-parser";
+import _ from 'lodash';
 import { JSONRPCServer } from "json-rpc-2.0";
 import { parse as uuidParse } from 'uuid';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import db from './db.js';
+import { Worker } from 'node:worker_threads';
 
 const server = new JSONRPCServer();
 
@@ -13,7 +15,34 @@ server.addMethod('saveEntitySchema', ({ name, data }) => {
   db.execute('insert into entity_schema (name, data) values (?, ?)', [name, JSON.stringify(data)]);
 });
 server.addMethod('getEntitySchema', ({ name }) => {
-  return JSON.parse(db.queryOne('select data from entity_schema where name = ?', [name])?.data);
+  function mapValuesRecursive(obj, iteratee) {
+    return _.mapValues(obj, (value, key) => {
+      if (_.isPlainObject(value)) {
+        return mapValuesRecursive(value, iteratee); // Recursive call for nested objects
+      }
+      return iteratee(value, key); // Apply iteratee to non-object values
+    });
+  }
+  function resolveSchema(n, definitions) {
+    const schema = JSON.parse(db.queryOne('select data from entity_schema where name = ?', [n])?.data);
+    return mapValuesRecursive(schema.model, (prop, key) => {
+      if (key === '$ref') {
+        const refName = prop.split('.json#')[0];
+        if (refName && refName !== n) {
+          definitions[refName] = resolveSchema(refName, definitions); // Recursive resolution for referenced schemaj
+          return "#/definitions/" + refName; // Return a placeholder for definitions
+        }
+      }
+      return prop;
+    });
+  }
+
+  const schema = JSON.parse(db.queryOne('select data from entity_schema where name = ?', [name])?.data);
+  const definitions = {};
+  schema.model = resolveSchema(name, definitions);
+  schema.model.definitions = definitions;
+
+  return schema;
 });
 server.addMethod('saveEntity', ({ id, data }) => {
   db.execute('insert into entity (id, data) values (?, ?)', [uuidParse(id), JSON.stringify(data)]);
@@ -25,6 +54,10 @@ server.addMethod('getEntity', ({ id }) => {
 db.execute('create table if not exists entity (id blob primary key, data jsonb)');
 db.execute('create table if not exists entity_rel (from_entity blob, to_entity blob, name text, data jsonb, primary key(from_entity, to_entity, name))');
 db.execute('create table if not exists entity_schema (name text primary key, data jsonb)');
+
+db.execute('create table if not exists workflow (id blob primary key, data jsonb)');
+db.execute('create table if not exists event (id blob primary key, data jsonb)');
+
 
 // Resolve __dirname for ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -67,6 +100,9 @@ for (const schema of schemas) {
 const port = 3000
 const app = express()
 
+// Start background event worker
+const eventWorker = new Worker(new URL('./workers/eventWorker.js', import.meta.url));
+
 // Allow CORS from all origins and handle preflight
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
@@ -99,3 +135,11 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
     console.log(`Listening on port ${port}`)
 })
+
+// Graceful shutdown
+function shutdown() {
+  try { eventWorker.postMessage('shutdown'); } catch {}
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

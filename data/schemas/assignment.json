@@ -12,17 +12,20 @@
                 "type": "string",
                 "title": "Description"
             },
-            "customer": {
-                "type": "object",
-                "title": "Customer",
-                "$ref": "customer.json#/model"
+            "tasks": {
+                "type": "array",
+                "title": "Tasks",
+                "items": {
+                    "$ref": "task.json#/model"
+                }
             }
         }
     },
     "ui": {
         "ui:order": [
             "displayId",
-            "description"
+            "description",
+            "tasks"
         ],
         "displayId": {
             "ui:placeholder": "Enter display ID"
