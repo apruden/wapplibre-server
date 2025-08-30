@@ -7,14 +7,18 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import db from './db.js';
+import {addDocument, searchDocuments} from './search.js';
 import { Worker } from 'node:worker_threads';
+import logger from './logger.js';
 
 const server = new JSONRPCServer();
 
 server.addMethod('saveEntitySchema', ({ name, data }) => {
   db.execute('insert into entity_schema (name, data) values (?, ?)', [name, JSON.stringify(data)]);
 });
+
 server.addMethod('getEntitySchema', ({ name }) => {
+  
   function mapValuesRecursive(obj, iteratee) {
     return _.mapValues(obj, (value, key) => {
       if (_.isPlainObject(value)) {
@@ -23,6 +27,7 @@ server.addMethod('getEntitySchema', ({ name }) => {
       return iteratee(value, key); // Apply iteratee to non-object values
     });
   }
+
   function resolveSchema(n, definitions) {
     const schema = JSON.parse(db.queryOne('select data from entity_schema where name = ?', [n])?.data);
     return mapValuesRecursive(schema.model, (prop, key) => {
@@ -44,14 +49,35 @@ server.addMethod('getEntitySchema', ({ name }) => {
 
   return schema;
 });
-server.addMethod('saveEntity', ({ id, data }) => {
-  db.execute('insert into entity (id, data) values (?, ?)', [uuidParse(id), JSON.stringify(data)]);
-});
-server.addMethod('getEntity', ({ id }) => {
-  return db.queryOne('select data from entity where id = ?', [uuidParse(id)]);
+
+server.addMethod('saveEntity', ({ name, id, data }) => {
+  logger.debug({ name, id, data }, 'saveEntity');
+  db.execute('insert into entity (id, name, data) values (?, ?, ?)', [uuidParse(id), name, JSON.stringify(data)]);
+  addDocument(id, data);
 });
 
-db.execute('create table if not exists entity (id blob primary key, data jsonb)');
+server.addMethod('getEntity', ({ name, id }) => {
+  const result = db.queryOne('select data from entity where name = ? and id = ?', [name, uuidParse(id)]);
+
+  return JSON.parse(result?.data);
+});
+
+server.addMethod('getEntities', ({ name, query }) => {
+  const ids = searchDocuments(query);
+
+  if (!ids || ids.length === 0) {
+    logger.info('No matching documents found');
+    return [];
+  }
+
+  const idsToFetch = ids.map(id => uuidParse(id));
+  const idsCriteria = `id in (${idsToFetch.map(() => '?').join(',')})`;
+  const results = db.query(`select data from entity where name = ? and ${idsCriteria}`, [name, ...idsToFetch]);
+
+  return results.map(r => JSON.parse(r.data));
+});
+
+db.execute('create table if not exists entity (id blob primary key, name text, data jsonb)');
 db.execute('create table if not exists entity_rel (from_entity blob, to_entity blob, name text, data jsonb, primary key(from_entity, to_entity, name))');
 db.execute('create table if not exists entity_schema (name text primary key, data jsonb)');
 
@@ -65,7 +91,7 @@ const __dirname = path.dirname(__filename);
 
 // Reads all JSON files under data/schemas and returns a list of parsed objects
 async function readAllSchemas() {
-  const schemasDir = path.join(__dirname, 'data', 'schemas');
+  const schemasDir = path.join(__dirname, 'resources', 'schemas');
   let entries;
   try {
     entries = await readdir(schemasDir, { withFileTypes: true });
@@ -85,7 +111,7 @@ async function readAllSchemas() {
       const fileNameWithoutExt = path.basename(filePath, '.json');
       results.push({name: fileNameWithoutExt, schema: JSON.parse(content)});
     } catch (err) {
-      console.warn(`Skipping schema "${path.basename(filePath)}": ${err.message}`);
+      logger.warn({ file: path.basename(filePath), err: err.message }, 'Skipping schema');
     }
   }
   return results;
@@ -133,7 +159,7 @@ app.get('/', (req, res) => {
 })
 
 app.listen(port, () => {
-    console.log(`Listening on port ${port}`)
+    logger.info({ port }, 'Listening on port');
 })
 
 // Graceful shutdown

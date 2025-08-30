@@ -87,5 +87,39 @@
                 "zipCode"
             ]
         }
+    },
+    "uiTable": {
+        "ui:columns": [
+            "username",
+            "email",
+            "firstName",
+            "lastName",
+            "phone",
+            "birthDate"
+        ],
+        "ui:actions": {
+            "edit": {
+                "label": "Edit",
+                "icon": "edit"
+            },
+            "delete": {
+                "label": "Delete",
+                "icon": "delete"
+            }
+        }
+    },
+    "uiSummary": {
+        "ui:title": "{{username}}'s Summary",
+        "ui:description": "{{email}} - {{phone}}",
+        "ui:actions": {
+            "edit": {
+                "label": "Edit",
+                "icon": "edit"
+            },
+            "delete": {
+                "label": "Delete",
+                "icon": "delete"
+            }
+        }
     }
 }

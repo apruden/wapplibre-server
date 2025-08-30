@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
+import * as fs from 'fs'
+
+fs.mkdirSync('./data/db', { recursive: true })
 
 class Db {
   constructor() {
-    this.sqliteDb = new Database('wapplibre.db', {});
+    this.sqliteDb = new Database('./data/db/wapplibre.db', {});
     this.sqliteDb.pragma('journal_mode = WAL');
   }
 

@@ -1,5 +1,6 @@
 import { parentPort } from 'node:worker_threads';
 import db from '../db.js';
+import logger from '../logger.js';
 
 const BATCH_SIZE = 50;
 
@@ -44,7 +45,7 @@ async function fetchAndLogBatch() {
 
   for (const row of rows) {
     const payload = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
-    console.log(`[eventWorker] Event id=${row.id?.toString('hex') || ''} data=${payload}`);
+    logger.info({ id: row.id?.toString('hex') || '', payload }, '[eventWorker] Event');
   }
 
   const ids = rows.map(r => r.id);
@@ -57,7 +58,7 @@ async function run() {
     try {
       await fetchAndLogBatch();
     } catch (err) {
-      console.error('[eventWorker] Error:', err);
+      logger.error({ err }, '[eventWorker] Error');
       // In case of errors, avoid tight loop
       await new Promise(r => setTimeout(r, 500));
     }

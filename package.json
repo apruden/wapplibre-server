@@ -12,11 +12,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@oxdev03/node-tantivy-binding": "^0.2.0",
     "better-sqlite3": "^12.2.0",
     "express": "^5.1.0",
     "json-rpc-2.0": "^1.7.1",
     "lodash": "^4.17.21",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "pino": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
