@@ -108,7 +108,7 @@
             }
         }
     },
-    "uiSummary": {
+    "uiShow": {
         "ui:title": "{{username}}'s Summary",
         "ui:description": "{{email}} - {{phone}}",
         "ui:actions": {
