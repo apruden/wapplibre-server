@@ -1,6 +1,3 @@
-import express from 'express';
-import bodyParser from "body-parser";
-import _ from 'lodash';
 import { JSONRPCServer } from "json-rpc-2.0";
 import { parse as uuidParse } from 'uuid';
 import { readdir, readFile } from 'node:fs/promises';
@@ -10,6 +7,8 @@ import db from './db.js';
 import {addDocument, searchDocuments} from './search.js';
 import { Worker } from 'node:worker_threads';
 import logger from './logger.js';
+import Fastify from 'fastify';
+import _ from 'lodash';
 
 const server = new JSONRPCServer();
 
@@ -124,48 +123,48 @@ for (const schema of schemas) {
 }
 
 const port = 3000
-const app = express()
+const app = Fastify({ logger: true })
 
 // Start background event worker
 const eventWorker = new Worker(new URL('./workers/eventWorker.js', import.meta.url));
 
-// Allow CORS from all origins and handle preflight
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
-  res.setHeader('Access-Control-Allow-Methods', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
+// Allow CORS and handle preflight
+app.addHook('onRequest', (request, reply, done) => {
+  reply.header('Access-Control-Allow-Origin', 'http://localhost:5173');
+  reply.header('Access-Control-Allow-Methods', '*');
+  reply.header('Access-Control-Allow-Headers', 'content-type, authorization');
+  reply.header('Access-Control-Allow-Credentials', 'true');
+  if (request.method === 'OPTIONS') {
+    reply.code(204).send();
+    return;
   }
-  next();
+  done();
 });
 
-app.use(bodyParser.json());
+// Fastify parses JSON bodies by default
 
-app.post("/api", (req, res) => {
-  const jsonRPCRequest = req.body;
-  server.receive(jsonRPCRequest).then((jsonRPCResponse) => {
-    if (jsonRPCResponse) {
-      res.json(jsonRPCResponse);
-    } else {
-      res.sendStatus(204);
-    }
-  });
+app.post('/api', async (request, reply) => {
+  const jsonRPCRequest = request.body;
+  const jsonRPCResponse = await server.receive(jsonRPCRequest);
+  if (jsonRPCResponse) {
+    reply.send(jsonRPCResponse);
+  } else {
+    reply.code(204).send();
+  }
 });
 
-app.get('/', (req, res) => {
-  res.send('wapplibre');
-})
+app.get('/', async (request, reply) => {
+  reply.send('wapplibre');
+});
 
-app.listen(port, () => {
-    logger.info({ port }, 'Listening on port');
-})
+const address = await app.listen({ port })
+logger.info({ port, address }, 'Listening on port')
 
 // Graceful shutdown
-function shutdown() {
+async function shutdown() {
   try { eventWorker.postMessage('shutdown'); } catch {}
+  try { await app.close(); } catch {}
   process.exit(0);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => { shutdown(); });
+process.on('SIGTERM', () => { shutdown(); });
